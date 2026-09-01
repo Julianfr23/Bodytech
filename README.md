@@ -2,42 +2,107 @@
 
 Prueba técnica — Desarrollador Fullstack PHP + React (Bodytech).
 
-Backend en PHP 8.2 con **Slim 4** (micro-framework, sin ORM: PDO directo para
-que las consultas queden explícitas) + MySQL. Frontend en **React** (Vite)
-como SPA que consume la API.
+Backend desarrollado en **PHP 8.2+**, utilizando **Slim 4** como micro-framework, **PDO** para acceso directo a MySQL y **MySQL 8** como base de datos.
+
+Frontend desarrollado en **React + Vite** como SPA que consume la API REST del backend.
 
 ## Estructura
 
+```text
+backend/     API PHP (Slim 4 + PDO)
+frontend/    SPA en React (Vite)
 ```
-backend/    API PHP (Slim 4 + PDO)
-frontend/   SPA en React (Vite)
-```
+
+## Funcionalidades implementadas
+
+* CRUD de clientes.
+* Creación y consulta de suscripciones.
+* Motor de cobro basado en estado persistido en base de datos.
+* Simulación de pasarela de pagos.
+* Resultados de pasarela: aprobado, rechazado y timeout.
+* Webhook HTTP para notificación de resultados.
+* Webhook idempotente.
+* Sistema de reintentos de cobro.
+* Pausa automática después de tres intentos fallidos.
+* Reloj simulado para probar el paso del tiempo.
+* Soporte para ciclos mensuales y anuales.
+* Frontend SPA en React.
+* Proxy de Vite para comunicación con la API durante desarrollo.
 
 ## 1. Levantar el backend
 
-Requisitos: PHP 8.2+, Composer, MySQL 8.
+### Requisitos
+
+* PHP 8.2+
+* Composer
+* MySQL 8+
+
+### Instalación
+
+Desde la raíz del proyecto:
 
 ```bash
 cd backend
 composer install
-cp .env.example .env        # ajusta credenciales de MySQL si hace falta
-mysql -u root -p -e "CREATE DATABASE subscription_engine"
-mysql -u root -p subscription_engine < database/schema.sql
-mysql -u root -p subscription_engine < database/seed.sql   # datos de prueba, opcional
+```
 
+Copia el archivo de variables de entorno:
+
+**Windows PowerShell:**
+
+```powershell
+Copy-Item .env.example .env
+```
+
+**Linux/macOS:**
+
+```bash
+cp .env.example .env
+```
+
+Ajusta las credenciales de MySQL en `.env` si es necesario.
+
+Crea la base de datos:
+
+```bash
+mysql -u root -p -e "CREATE DATABASE subscription_engine"
+```
+
+Ejecuta el esquema:
+
+```bash
+mysql -u root -p subscription_engine < database/schema.sql
+```
+
+Opcionalmente, carga los datos de prueba:
+
+```bash
+mysql -u root -p subscription_engine < database/seed.sql
+```
+
+Finalmente, inicia el servidor:
+
+```bash
 php -S localhost:8080 -t public
 ```
 
-La API queda en `http://localhost:8080/api/...`.
+La API estará disponible en:
 
-> **Importante:** el simulador de pasarela llama a su propio webhook por
-> HTTP (`APP_BASE_URL` en `.env`), y el motor de cobro llama al simulador de
-> la misma forma. Si cambias el puerto en el que corres `php -S`, actualiza
-> `APP_BASE_URL` en `.env` para que coincida.
+```text
+http://localhost:8080/api/
+```
+
+> **Importante:** el simulador de pasarela se comunica con el webhook de la aplicación mediante HTTP y el motor de cobro se comunica con el simulador de pasarela de la misma forma. La URL base se configura mediante `APP_BASE_URL` en `.env`.
+>
+> Si cambias el puerto utilizado por `php -S`, actualiza `APP_BASE_URL` para que coincida.
 
 ## 2. Levantar el frontend
 
-Requisitos: Node 18+.
+### Requisitos
+
+* Node.js 18+
+
+Desde la raíz del proyecto:
 
 ```bash
 cd frontend
@@ -45,118 +110,270 @@ npm install
 npm run dev
 ```
 
-Abre `http://localhost:5173`. Vite tiene un proxy configurado (`vite.config.js`)
-que reenvía `/api/*` a `http://localhost:8080`, así que el frontend no
-necesita saber el puerto del backend en desarrollo.
+Abre:
 
-## 3. Flujo de punta a punta para probar
-
-1. Crea un cliente en **Clientes → Nuevo cliente**.
-2. Entra al cliente y crea una suscripción (**+ Nueva suscripción**).
-3. Ve a **Motor de cobro** y presiona **Correr motor de cobro**: como la
-   suscripción nunca se ha cobrado, se genera su primer intento de inmediato
-   y se resuelve contra el simulador de pasarela.
-4. Entra al detalle de la suscripción para ver el intento reflejado en su
-   historial (y su estado, si fue aprobado/rechazado).
-
-## Simular el paso del tiempo
-
-En vez de tocar la fecha del sistema operativo, la app tiene un **reloj
-simulado** guardado en la tabla `settings` (`App\Support\Clock`). Todo el
-motor de cobro razona con `Clock::now()`, nunca con la hora real directamente.
-
-- `GET /api/clock` — consulta la hora simulada actual.
-- `POST /api/clock/advance { "seconds": 86400 }` — adelanta el reloj.
-- `POST /api/clock/reset` — lo vuelve a poner en la hora real.
-
-Desde el frontend, la pantalla **Motor de cobro** tiene botones para
-adelantar 24 horas (para forzar un reintento), 1 mes o 1 año (para forzar
-que a una suscripción mensual/anual ya le toque cobrar de nuevo).
-
-Ejemplo de ciclo completo de reintentos por línea de comandos:
-
-```bash
-curl -X POST localhost:8080/api/charge-engine/run -d '{"force":"rechazado"}' -H 'Content-Type: application/json'
-curl -X POST localhost:8080/api/clock/advance -d '{"seconds":86400}' -H 'Content-Type: application/json'
-curl -X POST localhost:8080/api/charge-engine/run -d '{"force":"rechazado"}' -H 'Content-Type: application/json'
-curl -X POST localhost:8080/api/clock/advance -d '{"seconds":86400}' -H 'Content-Type: application/json'
-curl -X POST localhost:8080/api/charge-engine/run -d '{"force":"rechazado"}' -H 'Content-Type: application/json'
-# tras el 3er intento fallido seguido, la suscripción queda "pausada"
+```text
+http://localhost:5173
 ```
 
-## Forzar el resultado del simulador de pasarela
+Vite tiene configurado un proxy que reenvía las solicitudes `/api/*` hacia:
 
-El simulador (`POST /api/gateway/charge`) responde por defecto
-60% aprobado / 30% rechazado / 10% timeout. Hay dos formas de forzarlo:
+```text
+http://localhost:8080
+```
 
-1. **Por request**, mandando `force` en el body:
-   `{"attempt_id": 12, "force": "timeout"}`.
-2. **Por variable de entorno**, `GATEWAY_FORCE_RESULT=rechazado` en `.env`,
-   que aplica a toda la app mientras esté seteada.
+Por esta razón, durante el desarrollo el frontend no necesita conocer directamente el puerto del backend.
 
-El motor de cobro (`POST /api/charge-engine/run`) acepta el mismo parámetro
-`force` y lo reenvía a cada intento que genera en esa corrida — así se puede
-forzar todo un ciclo de prueba desde la pantalla **Motor de cobro** del
-frontend sin tocar el backend.
+## 3. Flujo de punta a punta
 
-## Cómo funciona el motor de cobro (resumen del diseño)
+1. Ve a **Clientes → Nuevo cliente** y crea un cliente.
+2. Entra al detalle del cliente y selecciona **+ Nueva suscripción**.
+3. Ve a **Motor de cobro**.
+4. Presiona **Correr motor de cobro**.
+5. Como la suscripción todavía no tiene un cobro exitoso, se genera el primer intento.
+6. El motor envía el intento al simulador de pasarela.
+7. La pasarela notifica el resultado mediante el webhook.
+8. Entra al detalle de la suscripción para consultar el historial de intentos y su estado.
 
-- Cada suscripción **activa** se evalúa mirando únicamente su **último
-  intento de cobro** en base de datos (nunca un contador en memoria), así que
-  correr el motor varias veces seguidas sin que avance el reloj no genera
-  intentos duplicados.
-- Si nunca se le ha cobrado, o ya pasó un mes/año desde su último cobro
-  **exitoso**, se genera el intento #1 de un ciclo nuevo.
-- Si el último intento quedó **pendiente** (timeout de la pasarela) o
-  **fallido**, y ya pasaron 24h simuladas, se genera el siguiente intento del
-  mismo ciclo (hasta el intento #3).
-- Si el intento #3 también falla (o queda pendiente más de 24h sin
-  respuesta), la suscripción pasa a **pausada** automáticamente.
-- El simulador de pasarela notifica el resultado llamando de verdad, por
-  HTTP, al webhook (`App\Support\GatewayClient`) — igual que lo haría una
-  pasarela real — salvo en el caso de timeout, donde deliberadamente no
-  llama a nadie.
-- El webhook es **idempotente**: si le llega una notificación para un
-  intento que ya estaba resuelto, no vuelve a tocar el estado.
+## 4. Simular el paso del tiempo
 
-## Uso de inteligencia artificial
+La aplicación utiliza un **reloj simulado** almacenado en la tabla `settings`.
 
-Usé Claude para acelerar la escritura de este proyecto (controladores CRUD
-repetitivos, el esqueleto del SPA en React, este README). Contexto que le di
-en cada caso: el enunciado completo de la prueba y las decisiones de diseño
-del motor de cobro (esquema de tablas, cómo simular el reloj, cómo modelar
-los reintentos) ya definidas por mí antes de generar código.
+La clase `App\Support\Clock` centraliza el manejo del tiempo utilizado por el motor de cobro. De esta manera, las pruebas no requieren modificar la fecha/hora del sistema operativo.
 
-Qué descarté y por qué:
+### Consultar la hora simulada
 
-- La primera versión que generó el ciclo de reintentos usaba un `JOB`/cola en
-  memoria para reprogramar el siguiente intento. Lo descarté porque no
-  sobrevive a que el proceso PHP termine entre requests (cada request de
-  `php -S` es un proceso nuevo) y porque la prueba pide que el motor sea
-  re-ejecutable de forma idempotente mirando el estado persistido, no un
-  temporizador en memoria. Por eso el diseño final recalcula todo a partir
-  de la fila más reciente en `charge_attempts` cada vez que corre.
-- Se sugirió usar Laravel con Eloquent para el CRUD. Lo descarté por tiempo:
-  con Slim + PDO directo el código es más corto de revisar línea por línea
-  en la entrevista, y la prueba no exige un framework completo.
-- Para el "reloj simulado" se sugirió mockear `date()` globalmente con una
-  extensión tipo `uopz`. Lo descarté porque depende de una extensión que no
-  siempre está instalada; el offset guardado en la tabla `settings` funciona
-  en cualquier instalación de PHP estándar.
+```http
+GET /api/clock
+```
 
-Todo el código fue revisado y entendido por mí antes de incluirlo; puedo
-explicar cualquier decisión en la entrevista.
+### Adelantar el reloj
 
-## Pendientes / lo que haría distinto con más tiempo
+Ejemplo: adelantar 24 horas:
 
-- No implementé la integración real con una pasarela (punto opcional):
-  con más tiempo integraría el sandbox de Wompi, exponiendo el mismo
-  `POST /api/webhooks/gateway` como su webhook de confirmación y firmando/
-  validando la notificación con el secreto de eventos de Wompi.
-- No hay paginación en los listados de clientes/suscripciones; para un
-  volumen real de datos la agregaría en `index()` de ambos controladores.
-- No hay tests automatizados. Con más tiempo cubriría con PHPUnit
-  principalmente `ChargeEngineController::decide()`, que es donde vive toda
-  la lógica de negocio del ciclo de reintentos.
-- El manejo de zona horaria asume que el servidor MySQL y PHP están en la
-  misma zona horaria; en producción normalizaría todo a UTC.
+```http
+POST /api/clock/advance
+Content-Type: application/json
+
+{
+  "seconds": 86400
+}
+```
+
+### Reiniciar el reloj
+
+```http
+POST /api/clock/reset
+```
+
+El frontend incluye botones para adelantar:
+
+* 24 horas, para probar reintentos.
+* 1 mes, para probar nuevos ciclos mensuales.
+* 1 año, para probar nuevos ciclos anuales.
+
+### Ejemplo de ciclo de reintentos
+
+Forzar un rechazo en el primer intento:
+
+```bash
+curl -X POST localhost:8080/api/charge-engine/run \
+  -d '{"force":"rechazado"}' \
+  -H 'Content-Type: application/json'
+```
+
+Adelantar 24 horas:
+
+```bash
+curl -X POST localhost:8080/api/clock/advance \
+  -d '{"seconds":86400}' \
+  -H 'Content-Type: application/json'
+```
+
+Ejecutar nuevamente el motor:
+
+```bash
+curl -X POST localhost:8080/api/charge-engine/run \
+  -d '{"force":"rechazado"}' \
+  -H 'Content-Type: application/json'
+```
+
+Volver a adelantar 24 horas:
+
+```bash
+curl -X POST localhost:8080/api/clock/advance \
+  -d '{"seconds":86400}' \
+  -H 'Content-Type: application/json'
+```
+
+Ejecutar el motor por tercera vez:
+
+```bash
+curl -X POST localhost:8080/api/charge-engine/run \
+  -d '{"force":"rechazado"}' \
+  -H 'Content-Type: application/json'
+```
+
+Después del tercer intento fallido consecutivo, la suscripción pasa automáticamente a estado `pausada`.
+
+## 5. Simulador de pasarela
+
+El endpoint del simulador es:
+
+```http
+POST /api/gateway/charge
+```
+
+Por defecto, el simulador genera aleatoriamente:
+
+* 60% aprobado
+* 30% rechazado
+* 10% timeout
+
+También es posible forzar el resultado para facilitar las pruebas.
+
+### Forzar resultado por request
+
+Ejemplo:
+
+```json
+{
+  "attempt_id": 12,
+  "force": "timeout"
+}
+```
+
+Los valores soportados son:
+
+```text
+aprobado
+rechazado
+timeout
+```
+
+### Forzar resultado mediante variable de entorno
+
+También puede configurarse:
+
+```env
+GATEWAY_FORCE_RESULT=rechazado
+```
+
+Esta configuración aplica a todas las solicitudes mientras esté definida.
+
+El endpoint del motor de cobro también acepta `force` y lo reenvía al simulador para permitir probar ciclos completos desde el frontend sin modificar el código.
+
+## 6. Diseño del motor de cobro
+
+El motor está diseñado para que el estado de los cobros sea **persistente e idempotente**.
+
+Cada suscripción activa se evalúa consultando su último intento registrado en la base de datos. No se utilizan contadores ni trabajos pendientes almacenados únicamente en memoria.
+
+### Nuevo ciclo
+
+Si una suscripción nunca ha sido cobrada, o ya transcurrió el período correspondiente desde su último cobro exitoso:
+
+* Mensual → un mes.
+* Anual → un año.
+
+se genera un nuevo intento `#1`.
+
+### Reintentos
+
+Si el último intento quedó:
+
+* `fallido`, o
+* `pendiente` debido a un timeout,
+
+y han transcurrido al menos 24 horas simuladas, se genera el siguiente intento del mismo ciclo.
+
+El ciclo permite hasta tres intentos.
+
+### Pausa automática
+
+Si el tercer intento falla, la suscripción pasa automáticamente a:
+
+```text
+pausada
+```
+
+También se contempla el caso de un intento pendiente que permanece sin respuesta durante más de 24 horas.
+
+### Comunicación con la pasarela
+
+El motor de cobro se comunica mediante HTTP con el simulador de pasarela.
+
+Cuando la pasarela obtiene un resultado, realiza una solicitud HTTP al webhook:
+
+```http
+POST /api/webhooks/gateway
+```
+
+El caso `timeout` deliberadamente no genera una notificación, permitiendo probar el flujo de intentos pendientes.
+
+### Idempotencia del webhook
+
+El webhook verifica el estado del intento antes de modificarlo.
+
+Si recibe una notificación para un intento que ya fue resuelto, no vuelve a modificar su estado.
+
+## 7. Uso de inteligencia artificial
+
+Se utilizó **Claude** como herramienta de apoyo para acelerar la implementación, principalmente en tareas repetitivas y de estructura inicial:
+
+* Controladores CRUD.
+* Estructura inicial del frontend SPA.
+* README.
+* Código repetitivo.
+
+El contexto utilizado incluía el enunciado completo de la prueba y las decisiones de diseño del motor de cobro, las cuales fueron definidas previamente.
+
+Las decisiones arquitectónicas y de negocio fueron revisadas antes de incorporar el código generado.
+
+### Decisiones y alternativas descartadas
+
+#### Cola o JOB en memoria
+
+La primera propuesta para los reintentos utilizaba una cola en memoria para programar el siguiente intento.
+
+Se descartó porque el estado no sobreviviría al reinicio del proceso y no se ajustaba al enfoque requerido de recalcular el comportamiento a partir del estado persistido.
+
+La implementación final consulta `charge_attempts` en cada ejecución del motor.
+
+#### Laravel + Eloquent
+
+También se consideró Laravel con Eloquent.
+
+Se optó por **Slim 4 + PDO** porque proporciona una implementación más pequeña y explícita para esta prueba, permitiendo revisar directamente las consultas y separar claramente la lógica HTTP de la lógica de persistencia.
+
+#### Modificación global de `date()`
+
+Para el reloj simulado se consideró utilizar una extensión como `uopz` para modificar el comportamiento global de fecha/hora.
+
+Se descartó por depender de una extensión adicional de PHP.
+
+La solución final utiliza un offset persistido en la tabla `settings`, que permite controlar el tiempo simulado sin modificar el sistema operativo.
+
+## 8. Mejoras futuras
+
+Con más tiempo, se podrían incorporar las siguientes mejoras:
+
+* Integración con una pasarela real, por ejemplo el sandbox de Wompi.
+* Validación de firma/secreto en las notificaciones reales de la pasarela.
+* Paginación en los listados de clientes y suscripciones.
+* Suite de tests automatizados con PHPUnit, especialmente para la lógica de decisión del motor de cobro.
+* Normalización de fechas a UTC para un entorno productivo distribuido.
+
+## 9. Nota sobre el entorno de evaluación
+
+El proyecto está pensado para ejecutarse localmente mediante:
+
+```text
+Backend  → http://localhost:8080
+Frontend → http://localhost:5173
+MySQL    → localhost:3306
+```
+
+La configuración específica de conexión se encuentra en `.env`.
+
+**No incluir el archivo `.env` real en el repositorio.** Utilizar `.env.example` como referencia para la configuración.

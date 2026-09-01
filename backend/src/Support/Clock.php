@@ -45,10 +45,15 @@ final class Clock
 
         $pdo = Database::connection();
         $stmt = $pdo->prepare(
-            'INSERT INTO settings (`key`, `value`) VALUES (:key, :value)
-             ON DUPLICATE KEY UPDATE `value` = :value'
+        'INSERT INTO settings (`key`, `value`) VALUES (:key, :insert_value)
+         ON DUPLICATE KEY UPDATE `value` = :update_value'
         );
-        $stmt->execute(['key' => self::KEY, 'value' => (string) $newOffset]);
+
+        $stmt->execute([
+        'key' => self::KEY,
+        'insert_value' => (string) $newOffset,
+        'update_value' => (string) $newOffset,
+        ]);
 
         return $newOffset;
     }
